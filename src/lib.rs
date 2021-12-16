@@ -57,14 +57,14 @@ impl TryFrom<u8> for OpenSubMode {
 pub struct OpenMode {
     pub submode: OpenSubMode,
 
-    // if mode has the OTRUNC (0x10) bit set, the file is to be truncated,
-    // which requires write permission (if the file is append-only, and permission is granted,
-    // the open succeeds but the file will not be trun- cated)
+    /// if mode has the OTRUNC (0x10) bit set, the file is to be truncated,
+    /// which requires write permission (if the file is append-only, and permission is granted,
+    /// the open succeeds but the file will not be trun- cated)
     pub truncate: bool,
 
-    // if the mode has the ORCLOSE (0x40) bit set,
-    // the file is to be removed when the fid is clunked,
-    // which requires permission to remove the file from its directory.
+    /// if the mode has the ORCLOSE (0x40) bit set,
+    /// the file is to be removed when the fid is clunked,
+    /// which requires permission to remove the file from its directory.
     pub rclose: bool,
 }
 
