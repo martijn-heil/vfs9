@@ -3,18 +3,84 @@
  */
 
 use std::io::{Read, Write};
+use std::convert::{TryFrom, TryInto};
 
 pub struct Vfs9Error();
 
 type Result<T> = std::result::Result<T, Vfs9Error>;
 
+/// The qid represents the server's unique identification for the file being accessed:
+/// two files on the same server hierarchy are the same if and only if their qids are the same.
+/// (The client may have multiple fids pointing to a single file on a server and hence having a single qid.)
+#[derive(Debug, PartialEq)]
+pub struct Qid {
+    /// The type of qid, specifies whether this is a file, a directory, append-only file, etc.
+    kind: u8,
+
+    /// A version number for a file; typically, it is incremented every time the file is modified.
+    qid_version: u32,
+
+    /// The path is an integer unique among all files in the hierarchy.
+    /// If a file is deleted and recreated with the same name in the same directory,
+    /// the old and new path components of the qids should be different.
+    qid_path: u64
+}
+
+/// The IoUnit field is the maximum number of bytes that are guaranteed to be read from or written to a given file,
+/// without breaking the I/O transfer into multiple 9P messages; see read(5).
+pub type IoUnit = u32;
+
+#[derive(Debug, PartialEq)]
+pub enum OpenSubMode {
+    Write,
+    Read,
+    ReadWrite,
+    Execute
+}
+
+impl TryFrom<u8> for OpenSubMode {
+    type Error = Vfs9Error;
+
+    fn try_from(bits: u8) -> std::result::Result<Self, Self::Error> {
+        let mode: u8 = bits & 0b00000011;
+        match mode {
+            0 => Ok(Self::Read),
+            1 => Ok(Self::Write),
+            2 => Ok(Self::ReadWrite),
+            3 => Ok(Self::Execute),
+            _ => Err(Vfs9Error())
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct OpenMode {
-    pub read: bool,
-    pub write: bool,
-    pub execute: bool,
+    pub submode: OpenSubMode,
+
+    // if mode has the OTRUNC (0x10) bit set, the file is to be truncated,
+    // which requires write permission (if the file is append-only, and permission is granted,
+    // the open succeeds but the file will not be trun- cated)
     pub truncate: bool,
+
+    // if the mode has the ORCLOSE (0x40) bit set,
+    // the file is to be removed when the fid is clunked,
+    // which requires permission to remove the file from its directory.
     pub rclose: bool,
+}
+
+impl OpenMode {
+    pub fn from_bits(fields: u8) -> Result<Self> {
+        let mut s = Self {
+            submode: fields.try_into()?,
+            truncate: false,
+            rclose: false
+        };
+
+        if fields & 0b00010000 != 0 { s.truncate = true; } // =0x10
+        if fields & 0b01000000 != 0 { s.rclose = true; }   // =0x40
+
+        Ok(s)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -165,7 +231,6 @@ pub trait File: FsEntity + std::marker::Sized {
     /// This request will fail if the client does not have write permission in the parent directory.
     fn remove(&mut self) -> Result<()>;
 
-
     /// The open request asks the file server to check permissions and prepare a fid for I/O with subsequent read and write messages.
     /// The mode field determines the type of I/O:
     ///  read,
@@ -183,11 +248,14 @@ pub trait File: FsEntity + std::marker::Sized {
     /// That is, after such a file has been opened, further opens will fail until fid has been clunked.
     /// All these permissions are checked at the time of the open request;
     /// subsequent changes to the permissions of files do not affect the ability to read, write, or remove an open file.
-    fn open(&mut self, mode: OpenMode) -> Result<()>;
+    ///
+    /// The iounit field returned by open may be zero.
+    /// If it is not, it is the maximum number of bytes that are guaranteed to be read from or written to the file,
+    /// without breaking the I/O transfer into multiple 9P messages; see read(5).
+    fn open(&mut self, mode: OpenMode) -> Result<(Qid, IoUnit)>;
 
     /// Returns the mode in which the file is opened. If the file is not open, it returns None.
     fn mode(&self) -> Option<OpenMode>;
-
 
     /// The read request asks for count bytes of data from the file identified by fid,
     /// which must be opened for reading, starting offset bytes after the beginning of the file.
