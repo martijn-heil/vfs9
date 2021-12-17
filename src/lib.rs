@@ -9,21 +9,56 @@ pub struct Vfs9Error();
 
 type Result<T> = std::result::Result<T, Vfs9Error>;
 
+#[derive(Debug, PartialEq)]
+pub struct FileType {
+    pub is_dir: bool,
+    pub is_append_only: bool,
+    pub is_exclusive: bool,
+    pub is_auth: bool,
+    pub is_temporary: bool,
+}
+
+impl FileType {
+    pub fn from_bits(b: u8) -> Self {
+        Self {
+            // bit 28 is skipped for 'historical reasons'
+            is_dir:         b & 0b10000000 != 0,
+            is_append_only: b & 0b01000000 != 0,
+            is_exclusive:   b & 0b00100000 != 0,
+            is_auth:        b & 0b00001000 != 0,
+            is_temporary:   b & 0b00000100 != 0
+        }
+    }
+
+    pub fn to_bits(&self) -> u8 {
+        let mut b = 0x00;
+
+        // bit 28 is skipped for 'historical reasons'
+        if self.is_dir         { b |= 0b10000000; }
+        if self.is_append_only { b |= 0b01000000; }
+        if self.is_exclusive   { b |= 0b00100000; }
+        if self.is_auth        { b |= 0b00001000; }
+        if self.is_temporary   { b |= 0b00000100; }
+
+        b
+    }
+}
+
 /// The qid represents the server's unique identification for the file being accessed:
 /// two files on the same server hierarchy are the same if and only if their qids are the same.
 /// (The client may have multiple fids pointing to a single file on a server and hence having a single qid.)
 #[derive(Debug, PartialEq)]
 pub struct Qid {
     /// The type of qid, specifies whether this is a file, a directory, append-only file, etc.
-    kind: u8,
+    pub file_type: FileType,
 
     /// A version number for a file; typically, it is incremented every time the file is modified.
-    qid_version: u32,
+    pub version: u32,
 
     /// The path is an integer unique among all files in the hierarchy.
     /// If a file is deleted and recreated with the same name in the same directory,
     /// the old and new path components of the qids should be different.
-    qid_path: u64
+    pub path: u64
 }
 
 /// The IoUnit field is the maximum number of bytes that are guaranteed to be read from or written to a given file,
@@ -156,34 +191,19 @@ impl Permissions {
 #[derive(Debug, PartialEq)]
 pub struct FileMode {
     pub permissions: Permissions,
-    pub is_dir: bool,
-    pub is_append_only: bool,
-    pub is_exclusive: bool,
-    pub is_auth: bool,
-    pub is_temporary: bool,
-
+    pub file_type: FileType,
 }
 
 impl FileMode {
     pub fn from_bits(fields: u32) -> Self {
-        Self { // bit 27 is skipped for 'historical reasons'
+        Self {
             permissions: Permissions::from_bits(fields),
-            is_dir:         ((fields & 0b10000000000000000000000000000000) != 0),
-            is_append_only: ((fields & 0b01000000000000000000000000000000) != 0),
-            is_exclusive:   ((fields & 0b00100000000000000000000000000000) != 0),
-            is_auth:        ((fields & 0b00001000000000000000000000000000) != 0),
-            is_temporary:   ((fields & 0b00000100000000000000000000000000) != 0)
+            file_type: FileType::from_bits((fields >> 24) as u8)
         }
     }
 
     pub fn to_bits(&self) -> u32 {
-        let mut fields: u32 = self.permissions.to_bits();
-        if self.is_dir           { fields |= 0b10000000000000000000000000000000; }
-        if self.is_append_only   { fields |= 0b01000000000000000000000000000000; }
-        if self.is_exclusive     { fields |= 0b00100000000000000000000000000000; }
-        if self.is_auth          { fields |= 0b00001000000000000000000000000000; }
-        if self.is_temporary     { fields |= 0b00000100000000000000000000000000; }
-        fields
+        self.permissions.to_bits() | (self.file_type.to_bits() as u32) << 24
     }
 }
 
