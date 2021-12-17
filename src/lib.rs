@@ -97,6 +97,19 @@ pub struct Permissions {
     pub other: IndividualPermissions,
 }
 
+
+const BIT_OTHER_EXECUTE: u32  = 0b00000000000000000000000000000001;
+const BIT_OTHER_WRITE: u32    = 0b00000000000000000000000000000010;
+const BIT_OTHER_READ: u32     = 0b00000000000000000000000000000100;
+
+const BIT_GROUP_EXECUTE: u32 = BIT_OTHER_EXECUTE << 3;
+const BIT_GROUP_WRITE: u32   = BIT_OTHER_WRITE << 3;
+const BIT_GROUP_READ: u32    = BIT_OTHER_READ << 3;
+
+const BIT_OWNER_EXECUTE: u32 = BIT_GROUP_EXECUTE << 3;
+const BIT_OWNER_WRITE: u32   = BIT_GROUP_WRITE << 3;
+const BIT_OWNER_READ: u32    = BIT_GROUP_READ << 3;
+
 impl Permissions {
     pub fn from_bits(fields: u32) -> Self {
         let mut p = Self {
@@ -106,24 +119,42 @@ impl Permissions {
         };
 
         //           0b00000000000000000000000000000000: 32 bit integer
-        if (fields & 0b00000000000000000000000000000001) != 0 { p.other.execute = true; }
-        if (fields & 0b00000000000000000000000000000010) != 0 { p.other.write = true; }
-        if (fields & 0b00000000000000000000000000000100) != 0 { p.other.read = true; }
+        if (fields & BIT_OTHER_EXECUTE) != 0 { p.other.execute = true; }
+        if (fields & BIT_OTHER_WRITE)   != 0 { p.other.write = true; }
+        if (fields & BIT_OTHER_READ)    != 0 { p.other.read = true; }
 
-        if (fields & 0b00000000000000000000000000001000) != 0 { p.group.execute = true; }
-        if (fields & 0b00000000000000000000000000010000) != 0 { p.group.write = true; }
-        if (fields & 0b00000000000000000000000000100000) != 0 { p.group.read = true; }
+        if (fields & BIT_GROUP_EXECUTE) != 0 { p.group.execute = true; }
+        if (fields & BIT_GROUP_WRITE)   != 0 { p.group.write = true; }
+        if (fields & BIT_GROUP_READ)    != 0 { p.group.read = true; }
 
-        if (fields & 0b00000000000000000000000001000000) != 0 { p.owner.execute = true; }
-        if (fields & 0b00000000000000000000000010000000) != 0 { p.owner.write = true; }
-        if (fields & 0b00000000000000000000000100000000) != 0 { p.owner.read = true; }
+        if (fields & BIT_OWNER_EXECUTE) != 0 { p.owner.execute = true; }
+        if (fields & BIT_OWNER_WRITE)   != 0 { p.owner.write = true; }
+        if (fields & BIT_OWNER_READ)    != 0 { p.owner.read = true; }
 
         p
+    }
+
+    pub fn to_bits(&self) -> u32 {
+        let mut b: u32 = 0x00000000;
+
+        if self.other.execute { b |= BIT_OTHER_EXECUTE; }
+        if self.other.write   { b |= BIT_OTHER_WRITE;   }
+        if self.other.read    { b |= BIT_OTHER_READ;    }
+
+        if self.group.execute { b |= BIT_GROUP_EXECUTE; }
+        if self.group.write   { b |= BIT_GROUP_WRITE;   }
+        if self.group.read    { b |= BIT_GROUP_READ;    }
+
+        if self.owner.execute { b |= BIT_OWNER_EXECUTE; }
+        if self.owner.write   { b |= BIT_OWNER_WRITE;   }
+        if self.owner.read    { b |= BIT_OWNER_READ;    }
+
+        b
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct StatMode {
+pub struct FileMode {
     pub permissions: Permissions,
     pub is_dir: bool,
     pub is_append_only: bool,
@@ -133,7 +164,7 @@ pub struct StatMode {
 
 }
 
-impl StatMode {
+impl FileMode {
     pub fn from_bits(fields: u32) -> Self {
         Self { // bit 27 is skipped for 'historical reasons'
             permissions: Permissions::from_bits(fields),
@@ -143,6 +174,16 @@ impl StatMode {
             is_auth:        ((fields & 0b00001000000000000000000000000000) != 0),
             is_temporary:   ((fields & 0b00000100000000000000000000000000) != 0)
         }
+    }
+
+    pub fn to_bits(&self) -> u32 {
+        let mut fields: u32 = self.permissions.to_bits();
+        if self.is_dir           { fields |= 0b10000000000000000000000000000000; }
+        if self.is_append_only   { fields |= 0b01000000000000000000000000000000; }
+        if self.is_exclusive     { fields |= 0b00100000000000000000000000000000; }
+        if self.is_auth          { fields |= 0b00001000000000000000000000000000; }
+        if self.is_temporary     { fields |= 0b00000100000000000000000000000000; }
+        fields
     }
 }
 
@@ -154,17 +195,10 @@ pub struct Stat {
     /// for kernel use
     pub dev: u32,
 
-    /// the type of the file (directory, etc.), represented as a bit vector corresponding to the high 8 bits of the file's mode word.
-    pub qid_type: u8,
-
-    /// version number for given path
-    pub qid_version: u32,
-
-    /// the file server's unique identification for the file
-    pub qid_path: u64,
+    pub qid: Qid,
 
     /// permissions and flags
-    pub mode: StatMode,
+    pub mode: FileMode,
 
     /// last access time
     pub atime: u32,
@@ -176,13 +210,13 @@ pub struct Stat {
     pub length: u64,
 
     /// file name; must be / if the file is the root directory of the server
-    pub names: Vec<String>,
+    pub name: String,
 
     /// owner name
     pub uid: String,
 
     /// group name
-    pub group: String,
+    pub gid: String,
 
     /// name of the user who last modified the file
     pub muid: String,
